@@ -1,0 +1,151 @@
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+	<style type="text/css">
+		body, html{width: 100%;height: 100%;margin:0;font-family:"微软雅黑";}
+		#allmap{height:100%;width:100%;}
+		#r-result{width:100%; font-size:14px;}
+	</style>
+	<script type="text/javascript" src="http://api.map.baidu.com/api?v=2.0&ak=Uz3zsZfM8TsHPWFDLGRy6TFprLcMLqqt"></script>
+	<title>城市名定位</title>
+</head>
+<body>
+	<div id="allmap"></div>
+	<div id="r-result">
+		经度: <input id="longitude" type="text" style="width:100px; margin-right:10px;" />
+		纬度: <input id="latitude" type="text" style="width:100px; margin-right:10px;" />
+		<input type="button" value="查询" onclick="theLocation()" />
+	</div>
+</body>
+</html>
+<script type="text/javascript">
+	// 百度地图API功能
+	var map = new BMap.Map("allmap");
+	map.centerAndZoom(new BMap.Point(108.88388180000000, 34.200039699999998), 13);
+	map.enableScrollWheelZoom(true);
+	
+	var top_left_control = new BMap.ScaleControl({anchor: BMAP_ANCHOR_TOP_LEFT});// 左上角，添加比例尺
+	var top_left_navigation = new BMap.NavigationControl();  //左上角，添加默认缩放平移控件
+	var top_right_navigation = new BMap.NavigationControl({anchor: BMAP_ANCHOR_TOP_RIGHT, type: BMAP_NAVIGATION_CONTROL_SMALL}); //右上角，仅包含平移和缩放按钮
+	/*缩放控件type有四种类型:
+	BMAP_NAVIGATION_CONTROL_SMALL：仅包含平移和缩放按钮；BMAP_NAVIGATION_CONTROL_PAN:仅包含平移按钮；BMAP_NAVIGATION_CONTROL_ZOOM：仅包含缩放按钮*/
+    map.addControl(top_left_control);        
+	map.addControl(top_left_navigation);     
+	map.addControl(top_right_navigation); 
+	var startPoint,lastPoint;
+  var myIcon = new BMap.Icon('http://lbsyun.baidu.com/jsdemo/img/car.png', new BMap.Size(52,26),{anchor : new BMap.Size(27, 13)});
+	 
+	var carMk ;
+	//var drivingMapPath = new BMap.DrivingRoute(map, {renderOptions:{map: map, autoViewport: true}});    //驾车实例
+	var drivingMapPath = new BMap.WalkingRoute(map, {renderOptions:{map: map, autoViewport: true}});
+	
+
+	
+	
+	
+	// 用经纬度设置地图中心点
+	function theLocation(){
+		if(document.getElementById("longitude").value != "" && document.getElementById("latitude").value != ""){
+			map.clearOverlays(); 
+			var new_point = new BMap.Point(document.getElementById("longitude").value,document.getElementById("latitude").value);
+			var marker = new BMap.Marker(new_point);  // 创建标注
+			map.addOverlay(marker);              // 将标注添加到地图中
+			map.panTo(new_point);      
+		}
+	}
+	
+	
+    function setStartMarkfun(JD,WD)
+	 {
+	 
+	    map.clearOverlays(); 
+		var tmp_point = new BMap.Point(JD,WD);
+	   
+	    var convertor = new BMap.Convertor();
+        var pointArr = [];
+        pointArr.push(tmp_point);
+        convertor.translate(pointArr, 1, 5, translateStartPointCallback)
+	
+	}
+	
+	
+		    //起始点坐标转换完之后的回调函数
+    translateStartPointCallback = function (data){
+      if(data.status === 0) {
+	  
+	    
+		 startPoint =data.points[0];
+		 map.centerAndZoom(startPoint, 15);  // 初始化地图,设置中心点坐标和地图级别
+		 carMk = new BMap.Marker(startPoint,{icon:myIcon});
+    	 map.addOverlay(carMk);
+
+      }
+    }
+	
+	
+
+
+	
+	function justmarkfun(JD,WD)
+	 {
+	 
+	   // map.clearOverlays(); 
+		var new_point = new BMap.Point(JD,WD);
+			
+	    var convertor = new BMap.Convertor();
+        var pointArr = [];
+        pointArr.push(new_point);
+        convertor.translate(pointArr, 1, 5, translateCallback)
+		
+	}
+	
+	
+	function clearMapfun()
+	{
+	 
+	    map.clearOverlays(); 
+		
+	}
+	
+	/*
+		function justmarkfun(JD,WD)
+	 {
+	 
+	        map.clearOverlays(); 
+			var new_point = new BMap.Point(JD,WD);
+			var marker = new BMap.Marker(new_point);  // 创建标注
+			map.addOverlay(marker);              // 将标注添加到地图中
+			//map.panTo(new_point);      
+
+		    drivingMapPath.search(startPoint, new_point);
+			//map.centerAndZoom(new_point);
+	}
+	*/
+	
+	
+	    //坐标转换完之后的回调函数
+    translateCallback = function (data){
+      if(data.status === 0) {
+       
+	    lastPoint = data.points[0];
+	    var pois = [ startPoint, lastPoint];
+	    var polyline =new BMap.Polyline(pois, {
+		enableEditing: false,//是否启用线编辑，默认为false
+		enableClicking: true,//是否响应点击事件，默认为true
+		strokeWeight:'8',//折线的宽度，以像素为单位
+		strokeOpacity: 0.8,//折线的透明度，取值范围0 - 1
+		strokeColor:"#18a45b" //折线颜色
+	   });
+	  
+	   map.addOverlay(polyline);          //增加折线
+	   carMk.setPosition(lastPoint);
+	   map.panTo(lastPoint);   
+	   startPoint =  lastPoint;
+      }
+    }
+
+
+
+
+</script>

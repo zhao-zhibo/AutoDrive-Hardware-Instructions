@@ -1,0 +1,15 @@
+在matlab 命令行窗口运行RumMain(filename,Endian,Kws).
+参数设置如下
+filename：文件路径
+Endian：大小段模式，常用为1,可空
+Kws：轮速比例系数，常用为0.00863,可空
+
+
+例子1：
+
+>>
+RunMain('E:\数据\0727\7-26-931.txt')
+
+例子2：
+>>
+RunMain('E:\数据\0727\7-26-931.txt',1,0.00863);

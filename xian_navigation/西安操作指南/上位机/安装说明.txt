@@ -1,0 +1,13 @@
+关闭360安全卫士，杀毒软件等
+第一步、进行环境配置，安装时只需运行一次
+1、所包含库文件和应用程序需要在同一个目录内
+2、以管理员身份运行“环境配置.bat”,根据操作系统运行32位或者64位
+
+第二步 运行程序InertiaMeasueUnit.exe
+1、如果弹出Control registration failed.对话框，请右键选择管理员身份运行
+
+
+如果仍然出错，则
+复制 cw3dgrph.ocx和cwui.ocx  到C:\Windows\SysWOW64\
+复制 cw3dgrph.ocx和cwui.ocx  到C:\Windows\System32\
+再运行"环境配置.bat" 
