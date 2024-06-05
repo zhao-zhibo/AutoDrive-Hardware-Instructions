@@ -1,0 +1,424 @@
+#include "RealNposSensor.h"
+#include <cmath>
+#include <unistd.h>
+#include <ros/ros.h>
+#include <visualization_msgs/Marker.h>
+#include <sensor_msgs/Imu.h>
+#include "INSPVAXA_Type.h"
+#include "conversions.h"
+
+
+using namespace navicore;
+
+UnionStruct m_pUnionStruct;
+
+RealNposSensor::RealNposSensor()
+{
+
+    //G320N  PwrPak7-E1   PwrPak7D-E1   SMART7-S
+    //gro_scalefactor=(0.008/65536)/125*deg2rad;
+    //acc_scalefactor=((0.200/65536)/125)*0.00980665;
+
+    //NPOS220内置惯导比例因子
+    gro_scalefactor = (0.0151515 / 65536.0) / 200.0 * (M_PI / 180);
+    acc_scalefactor = ((0.400 / 65536) / 200.0) * 0.00980665;
+
+    //NPOS320内置惯导比例因子
+    //gro_scalefactor = deg2rad/65.5;
+    //acc_scalefactor = 9.8080/8192.0;
+
+    ////IMU-CPT  IMU-KVH1750
+    //gro_scalefactor=0.1/(3600.0*256.0);
+    //acc_scalefactor=0.05/32768;
+    //m_SensorType = INS;
+
+    memset(data_buffer_, 0, sizeof(data_buffer_)); //init buffer
+}
+
+RealNposSensor::~RealNposSensor()
+{
+}
+
+bool RealNposSensor::open()
+{
+
+    // Open the Serial Port at the desired hardware port.
+    //    //sudo chmod 777 /dev/ttyUSB0  read and write permission
+    serial_port.Open("/dev/ttyUSB0", std::ios_base::in | std::ios_base::out); //open serial_port
+
+    //    // Set the baud rate of the serial port.
+    serial_port.SetBaudRate(BaudRate::BAUD_115200); //set the baudrate of serial port
+
+    //    // Set the number of data bits.
+    serial_port.SetCharacterSize(CharacterSize::CHAR_SIZE_8);
+
+    //    // Turn off hardware flow control.
+    serial_port.SetFlowControl(FlowControl::FLOW_CONTROL_NONE);
+
+    //    // Disable parity.
+    serial_port.SetParity(Parity::PARITY_NONE);
+
+    //    // Set the number of stop bits.
+    serial_port.SetStopBits(StopBits::STOP_BITS_1);
+
+    return true;
+}
+
+bool RealNposSensor::isOpen()
+{
+    return serial_port.IsOpen();
+}
+
+void RealNposSensor::close()
+{
+    serial_port.Close();
+}
+
+//将从串口去读的二进制数据转化为IMU数据
+void RealNposSensor::ParseBinary(unsigned char *message, size_t length, BINARY_LOG_TYPE message_id, sensor_msgs::Imu &imu_raw, ins_pub::INSPVAXA_Type &inspvaxa_info)
+{
+
+    //UnionStruct m_pUnionStruct;
+    //memset(&m_pUnionStruct, 0, sizeof(UnionStruct));
+
+    if (message_id == INSPVAXA_LOG_TYPE)
+    { //INSPVAXA数据
+        INSPVAXA frame;
+        memset(&frame, 0, sizeof(INSPVAXA));
+        //memcpy(&frame, message, sizeof(INSPVAXA));
+        memcpy(frame.header.sync_bytes, message, 3);
+        unsigned short N = (frame.header.header_len = message[3]);
+        frame.header.msg_ID = message[4] | (message[5] << 8);
+        frame.header.msg_type = message[6];
+        frame.header.port_addr = message[7];
+        frame.header.msg_len = message[8] | (message[9] << 8);
+        frame.header.sequence = message[10] | (message[11] << 8);
+        frame.header.idle_time = message[12];
+        frame.header.time_status = message[13]; // enum
+        frame.header.week = message[14] | (message[15] << 8);
+        frame.header.ms = message[16] | (message[17] << 8) |
+                          (message[18] << 16) | (message[19] << 24);
+        frame.header.rcvr_stat = message[20] | (message[21] << 8) |
+                                 (message[22] << 16) | (message[23] << 24);
+        frame.header.reserved = message[24] | (message[25] << 8);
+        frame.header.version = message[26] | (message[27] << 8);
+
+        memcpy(&frame.slo_status, message + N, 4);
+        memcpy(&frame.pos_type, message + N + 4, 4);
+
+        memcpy(&frame.latitude, message + N + 8, 8);
+        memcpy(&frame.longitude, message + N + 16, 8);
+        memcpy(&frame.altitude, message + N + 24, 8); // altitude means height
+
+        memcpy(&frame.undulation, message + N + 32, 4);
+
+        memcpy(&frame.veL_N, message + N + 36, 8);
+        memcpy(&frame.vel_E, message + N + 44, 8);
+        memcpy(&frame.vel_U, message + N + 52, 8);
+
+        memcpy(&frame.roll, message + N + 60, 8);
+        memcpy(&frame.pitch, message + N + 68, 8);
+        memcpy(&frame.azimuth, message + N + 76, 8);
+
+        memcpy(&frame.lat_std, message + N + 84, 4);
+        memcpy(&frame.lon_std, message + N + 88, 4);
+        memcpy(&frame.alt_std, message + N + 92, 4);
+        memcpy(&frame.vN_std, message + N + 96, 4);
+        memcpy(&frame.vE_std, message + N + 100, 4);
+        memcpy(&frame.vU_std, message + N + 104, 4);
+        memcpy(&frame.roll_std, message + N + 108, 4);
+        memcpy(&frame.pitch_std, message + N + 112, 4);
+        memcpy(&frame.azimuth_std, message + N + 116, 4);
+
+        memcpy(&frame.ext_sol_stat, message + N + 120, 4);
+        memcpy(&frame.update_time, message + N + 124, 2);
+
+        frame.checksum = message[N + 126] | (message[N + 127] << 8) |
+                         (message[N + 128] << 16) | (message[N + 129] << 24);
+
+        m_pUnionStruct.data_type = 1;
+        m_pUnionStruct.week = frame.header.week;
+        m_pUnionStruct.second = frame.header.ms;
+
+        m_pUnionStruct.accx_lat = frame.latitude;
+        m_pUnionStruct.accy_lon = frame.longitude;
+        m_pUnionStruct.accz_altitu = frame.altitude;
+
+        m_pUnionStruct.gyrox_latstd = frame.lat_std;
+        m_pUnionStruct.gyroy_lonstd = frame.lon_std;
+        m_pUnionStruct.gyroz_altitustd = frame.alt_std;
+
+        m_pUnionStruct.rpy_r = frame.roll;
+        m_pUnionStruct.rpy_p = frame.pitch;
+        m_pUnionStruct.rpy_y = frame.azimuth;
+
+        m_pUnionStruct.VelN = frame.veL_N;
+        m_pUnionStruct.VelE = frame.vel_E;
+        m_pUnionStruct.VelD = -frame.vel_U;
+
+        /****ROS Publishs the information of location*****/
+        inspvaxa_info.latitude = frame.latitude;
+        inspvaxa_info.longitude = frame.longitude;
+        inspvaxa_info.roll = frame.roll;
+        inspvaxa_info.pitch = frame.pitch;
+        inspvaxa_info.yaw = frame.azimuth;
+        ROS_INFO("latitude is [%.12f], longitude is [%.12f], yaw is [%f]", inspvaxa_info.latitude, inspvaxa_info.longitude, inspvaxa_info.yaw);
+        //std::cout << "[IMU] accx:"  << m_pUnionStruct.rpy_r << "[IMU] accy:" << m_pUnionStruct.rpy_p << "[IMU] accz:" <<   m_pUnionStruct.rpy_y << std::endl;
+    }
+    else if (message_id == RAWIMUSA_LOG_TYPE)
+    { //IMU数据
+        RAWIMUSA frame_imu;
+        memset(&frame_imu, 0, sizeof(RAWIMUSA));
+        //memcpy(&frame_imu, message, sizeof(RAWIMUSA));
+        memcpy(frame_imu.header.sync_bytes, message, 3);
+        unsigned short M = (frame_imu.header.header_len = message[3]);
+        //unsigned short M = 12;
+        frame_imu.header.msg_ID = message[4] | (message[5] << 8);
+        memcpy(&frame_imu.header.week, message + 14, 2);
+        memcpy(&frame_imu.header.ms, message + 16, 4);
+        frame_imu.week = message[M] | (message[M + 1] << 8) |
+                         (message[M + 2] << 16) | (message[M + 3] << 24);
+        memcpy(&frame_imu.seconds, message + M + 4, 8);
+
+        frame_imu.IMU_s = message[M + 12] | (message[M + 13] << 8) |
+                          (message[M + 14] << 16) | (message[M + 15] << 24);
+        memcpy(&frame_imu.z_accel, message + M + 16, 4);
+        memcpy(&frame_imu.y_accel, message + M + 20, 4);
+        memcpy(&frame_imu.x_accel, message + M + 24, 4); // altitude means height
+
+        memcpy(&frame_imu.z_gyro, message + M + 28, 4);
+        memcpy(&frame_imu.y_gyro, message + M + 32, 4);
+        memcpy(&frame_imu.x_gyro, message + M + 36, 4);
+
+        frame_imu.checksum = message[M + 40] | (message[M + 41] << 8) |
+                             (message[M + 42] << 16) | (message[M + 43] << 24);
+
+        //fprintf(m_pLogfile, "IMU,%d,%d,%d,%d,%d,%d,%d,%d\n", frame_imu.header.week, frame_imu.header.ms,
+        //frame_imu.z_accel, frame_imu.y_accel, frame_imu.x_accel,
+        //frame_imu.z_gyro, frame_imu.y_gyro, frame_imu.x_gyro);
+        ros::Time stamp(frame_imu.seconds);
+        imu_raw.header.stamp = stamp;
+        imu_raw.header.frame_id = "npos_imu";
+        //四元数位姿,所有数据设为固定值，可以自己写代码获取IMU的数据，，然后进行传递
+        imu_raw.orientation.x = 0;
+        imu_raw.orientation.y = 0;
+        imu_raw.orientation.z = 0;
+        imu_raw.orientation.w = 0;
+        //线加速度
+        imu_raw.linear_acceleration.x = (float)(-frame_imu.y_accel * acc_scalefactor);
+        imu_raw.linear_acceleration.y = (float)(-frame_imu.x_accel * acc_scalefactor);
+        imu_raw.linear_acceleration.z = (float)(frame_imu.z_accel * acc_scalefactor);
+        //角速度
+        imu_raw.angular_velocity.x = (float)(-frame_imu.y_gyro * gro_scalefactor);
+        imu_raw.angular_velocity.y = (float)(-frame_imu.x_gyro * gro_scalefactor);
+        imu_raw.angular_velocity.z = (float)(frame_imu.z_gyro * gro_scalefactor);
+        //m_pUnionStruct.data_type = 0;
+        //m_pUnionStruct.week = frame_imu.header.week;
+        //m_pUnionStruct.second = frame_imu.header.ms;
+        //m_pUnionStruct.accx_lat = (double)(-frame_imu.y_accel * acc_scalefactor);
+        //m_pUnionStruct.accy_lon = (double)(-frame_imu.x_accel * acc_scalefactor);
+        // m_pUnionStruct.accz_altitu = (double)(frame_imu.z_accel * acc_scalefactor);
+        //m_pUnionStruct.gyrox_latstd = (double)(-frame_imu.y_gyro * gro_scalefactor);
+        //m_pUnionStruct.gyroy_lonstd = (double)(-frame_imu.x_gyro * gro_scalefactor);
+        //m_pUnionStruct.gyroz_altitustd = (double)(frame_imu.z_gyro * gro_scalefactor);
+        //std::cout << "[IMU] accx:"  << -frame_imu.y_accel << "[IMU] accy:" << -frame_imu.x_accel << "[IMU] accz:" <<   frame_imu.z_accel << std::endl;
+    }
+    else
+    {
+        std::cout << "No Data Input! Please input into command~" << std::endl;
+    }
+}
+
+//从buffer中获取二进制数据并进行转化
+void RealNposSensor::BufferIncomingData(unsigned char *message, sensor_msgs::Imu &imu_raw, ins_pub::INSPVAXA_Type &inspvaxa_info, unsigned int length)
+{
+    // add incoming data to buffer
+    for (unsigned int ii = 0; ii < length; ii++)
+    {
+        // make sure bufIndex is not larger than buffer
+        if (buffer_index_ >= MAX_OUT_SIZE)
+        {
+            buffer_index_ = 0;
+            //log_warning_("Overflowed receive buffer. Buffer cleared.");
+        }
+
+        if (buffer_index_ == 0)
+        { // looking for beginning of message
+            if (message[ii] == NOVATEL_SYNC_BYTE_1)
+            { // beginning of msg found - add to buffer
+                data_buffer_[buffer_index_++] = message[ii];
+                bytes_remaining_ = 0;
+            }
+        }
+        else if (buffer_index_ == 1)
+        { // verify 2nd character of header
+            if (message[ii] == NOVATEL_SYNC_BYTE_2)
+            { // 2nd byte ok - add to buffer
+                data_buffer_[buffer_index_++] = message[ii];
+            }
+            else
+            {
+                // start looking for new message again
+                buffer_index_ = 0;
+                bytes_remaining_ = 0;
+                //reading_acknowledgement_=false;
+                //reading_reset_complete_=false;
+            } // end if (msg[i]==0x44)
+        }
+        else if (buffer_index_ == 2)
+        { // verify 3rd character of header
+            //if (message[ii] == NOVATEL_SYNC_BYTE_3||message[ii] == NOVATEL_SYNC_BYTE_4) {	// 2nd byte ok - add to buffer
+            if (message[ii] == NOVATEL_SYNC_BYTE_3)
+            { // 2nd byte ok - add to buffer
+                data_buffer_[buffer_index_++] = message[ii];
+            }
+            else if (message[ii] == NOVATEL_SYNC_BYTE_4)
+            {
+                data_buffer_[buffer_index_++] = message[ii];
+            }
+            else
+            {
+                // start looking for new message again
+                buffer_index_ = 0;
+                bytes_remaining_ = 0;
+            } // end if (msg[i]==0x12)
+        }
+        else if (buffer_index_ == 3)
+        { // number of bytes in header - not including sync
+
+            if (data_buffer_[2] == NOVATEL_SYNC_BYTE_4)
+            {
+                data_buffer_[buffer_index_++] = message[ii];
+                msg_length_ = message[ii];
+                header_length_ = 12;
+            }
+            else
+            {
+                data_buffer_[buffer_index_++] = message[ii];
+                // length of header is in byte 4
+                header_length_ = message[ii];
+            }
+        }
+        else if (buffer_index_ == 5)
+        { // get message id
+            data_buffer_[buffer_index_++] = message[ii];
+            message_id_ = BINARY_LOG_TYPE(((data_buffer_[buffer_index_ - 1]) << 8) + data_buffer_[buffer_index_ - 2]);
+        }
+        else if (buffer_index_ == 9)
+        {
+            if (data_buffer_[2] == NOVATEL_SYNC_BYTE_4)
+            {
+                data_buffer_[buffer_index_++] = message[ii];
+                bytes_remaining_ = (header_length_ - 10) + 4 + msg_length_;
+            }
+            else
+            {
+                data_buffer_[buffer_index_++] = message[ii];
+                msg_length_ = (data_buffer_[9] << 8) + data_buffer_[8];
+                bytes_remaining_ = (header_length_ - 10) + 4 + msg_length_;
+            }
+        }
+        else if (bytes_remaining_ == 1)
+        { // add last byte and parse
+            data_buffer_[buffer_index_++] = message[ii];
+            // BINARY_LOG_TYPE message_id = (BINARY_LOG_TYPE) (((data_buffer_[5]) << 8) + data_buffer_[4]);
+            // log_info_("Sending to ParseBinary")
+            ParseBinary(data_buffer_, buffer_index_, message_id_, imu_raw, inspvaxa_info);
+            // reset counters
+            buffer_index_ = 0;
+            bytes_remaining_ = 0;
+        }
+        else
+        { // add data to buffer
+            data_buffer_[buffer_index_++] = message[ii];
+            bytes_remaining_--;
+        }
+        //std::cout<< "bytes_remaining_ length:" << bytes_remaining_<<std::endl;
+    } // end for
+}
+
+int main(int argc, char *argv[])
+{
+    // init ros node
+    ros::init(argc, argv, "imu_publisher_node"); // node
+    ros::NodeHandle nh;
+    ros::Publisher imu_raw_pub = nh.advertise<sensor_msgs::Imu>("/gnss/imu_data", 10);
+    ros::Publisher ins_raw_pub = nh.advertise<ins_pub::INSPVAXA_Type>("/gnss/ins_data", 10);
+    ros::Publisher markerPub = nh.advertise<visualization_msgs::Marker>("/txt/gnss", 10);
+    ros::Rate loop_rate(1000);
+
+    //ready reading the data
+    RealNposSensor pRealNposSensor;
+    size_t ms_timeout = 5;
+    if (!pRealNposSensor.open())
+    {
+        std::cout << "open serial port fail! " << std::endl;
+        return 0;
+    }
+    else
+    {
+        std::cout << "open serial port success! " << std::endl;
+    }
+
+    // ensure the data is available
+    while (!pRealNposSensor.serial_port.IsDataAvailable())
+    {
+        sleep(1);
+    }
+
+    sensor_msgs::Imu imu_raw;
+    ins_pub::INSPVAXA_Type inspvaxa_info;
+    while (ros::ok())
+    {
+        //reading data
+        DataBuffer buffer;
+        try
+        {
+            pRealNposSensor.serial_port.Read(buffer, 0, ms_timeout); //串口读取数据
+        }
+        catch (ReadTimeout)
+        {
+            unsigned char message[MAX_OUT_SIZE];
+            size_t i = 0;
+            for (; i < buffer.size(); i++)
+            {
+                message[i] = buffer.at(i);
+            }
+            size_t len = i;
+            pRealNposSensor.BufferIncomingData(message, imu_raw, inspvaxa_info, len);
+        }
+
+        std::string zone;
+        gps_common::LLtoUTM(inspvaxa_info.latitude, inspvaxa_info.longitude, inspvaxa_info.x, inspvaxa_info.y, zone);
+        visualization_msgs::Marker markerClass;
+        char text[64];
+        markerClass.header.frame_id = "world";
+        markerClass.action = visualization_msgs::Marker::ADD;
+        markerClass.header.stamp = ros::Time::now();
+        markerClass.pose.orientation.w = 1.0;
+        markerClass.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+        markerClass.color.a = 1;
+        geometry_msgs::Pose pose;
+        pose.position.x = 0;
+        pose.position.y = 0;
+        pose.position.z = 3;
+        markerClass.pose.orientation.w = 1.0;
+        markerClass.color.b = 45;
+        markerClass.color.g = 23;
+        markerClass.color.r = 90;
+        markerClass.scale.z = 2;
+        markerClass.scale.y = 2;
+        markerClass.scale.x = 2;
+
+        sprintf(text,"UTM X:%f  UTM Y:%f", inspvaxa_info.x, inspvaxa_info.y);
+        markerClass.text=text;
+        markerClass.pose=pose;
+        markerPub.publish(markerClass);
+        ROS_INFO("UTM x is [%.12f], y is [%.12f], yaw is [%f]", inspvaxa_info.x, inspvaxa_info.y, inspvaxa_info.yaw);
+                ins_raw_pub.publish(inspvaxa_info);
+        imu_raw_pub.publish(imu_raw); //imu_raw_pub 节点发布消息至imu_data topic
+        ros::spinOnce();
+        //loop_rate.sleep();
+    }
+    return 0;
+}
