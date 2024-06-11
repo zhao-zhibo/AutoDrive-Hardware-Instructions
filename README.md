@@ -3,11 +3,11 @@
 
 # 1 下载代码
 ```
-git clone git@github.com:zhao-zhibo/Roadside-LiDAR-Tracking.git  
+git@github.com:zhao-zhibo/AutoDrive-Hardware-Instructions.git 
 ```
 # 2 对仓库进行更改时提交的命令  
 ```
-git clone git@github.com:zhao-zhibo/Roadside-LiDAR-Tracking.git  
+git@github.com:zhao-zhibo/AutoDrive-Hardware-Instructions.git
 git add .   
 git commit -m "ver XX(更改了什么内容)" 
 git push origin main
